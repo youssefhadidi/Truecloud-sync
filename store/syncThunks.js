@@ -2,7 +2,7 @@ import { createAsyncThunk } from '@reduxjs/toolkit';
 import { Alert } from 'react-native';
 import * as Network from 'expo-network';
 import axiosClient from '../services/axiosClient';
-import { getAssetUri } from '../services/galleryService';
+import { getAssetInfo } from '../services/galleryService';
 import {
   initUploadItems,
   setItemStatus,
@@ -26,7 +26,7 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
   dispatch(setItemStatus({ assetId: asset.id, status: 'syncing' }));
 
   try {
-    const uri = await getAssetUri(asset.id);
+    const { uri, fileSize } = await getAssetInfo(asset.id);
 
     const formData = new FormData();
     formData.append('file', {
@@ -40,12 +40,14 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
       timeout: 5 * 60 * 1000,
       signal,
       onUploadProgress(evt) {
-        const { loaded, total } = evt;
-        if (total > 0) {
+        // React Native FormData uploads often report evt.total = 0 because the
+        // Content-Length header isn't set. Fall back to fileSize from MediaLibrary.
+        const denom = evt.total > 0 ? evt.total : fileSize;
+        if (denom > 0) {
           dispatch(
             setItemProgress({
               assetId: asset.id,
-              progress: Math.round((loaded / total) * 100),
+              progress: Math.round((evt.loaded / denom) * 100),
             })
           );
         }

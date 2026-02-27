@@ -35,10 +35,14 @@ export async function getAllAssets() {
 }
 
 /**
- * Get the full local URI for an asset (needed for upload).
+ * Get the local URI and file size for an asset (needed for upload).
  * Uses getAssetInfoAsync to resolve localUri on iOS.
+ * Returns { uri, fileSize } — fileSize may be 0 if MediaLibrary doesn't report it.
  */
-export async function getAssetUri(assetId) {
+export async function getAssetInfo(assetId) {
   const info = await MediaLibrary.getAssetInfoAsync(assetId);
-  return info.localUri || info.uri;
+  return {
+    uri: info.localUri || info.uri,
+    fileSize: info.fileSize ?? 0,
+  };
 }
