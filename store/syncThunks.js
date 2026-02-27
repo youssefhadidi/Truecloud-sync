@@ -8,6 +8,7 @@ import {
   setItemStatus,
   setItemProgress,
   setSyncing,
+  clearUploads,
 } from './uploadsSlice';
 import { clearSelection } from './gallerySlice';
 
@@ -163,7 +164,7 @@ export const startSync = createAsyncThunk(
 
     await runPool(tasks, concurrency);
 
-    dispatch(setSyncing(false));
+    dispatch(clearUploads()); // clears items + sets syncing: false
     dispatch(clearSelection());
   }
 );

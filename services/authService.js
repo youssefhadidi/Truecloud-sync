@@ -40,8 +40,15 @@ export async function login(baseUrl, email, password) {
     );
     console.log('[auth] credentials POST status:', loginRes.status);
   } catch (err) {
-    console.error('[auth] credentials POST failed:', err.message, err.response?.status);
-    throw new Error(`Login request failed: ${err.message}`);
+    if (err.response) {
+      // Got an HTTP error response — actual server-side failure
+      console.error('[auth] credentials POST HTTP error:', err.response.status, err.message);
+      throw new Error(`Login request failed: ${err.message}`);
+    }
+    // No HTTP response (Network Error) — NextAuth's 302 already set the session
+    // cookie in the native jar before axios tried to follow the redirect chain.
+    // Proceed to the session check which will confirm success or failure.
+    console.warn('[auth] credentials POST redirect-chain error (proceeding to session check):', err.message);
   }
 
   // Step 3: verify session — the cookie jar now has the session cookie

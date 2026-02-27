@@ -4,6 +4,7 @@ import {
   TouchableOpacity,
   View,
   Dimensions,
+  PixelRatio,
   InteractionManager,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -13,6 +14,10 @@ import StatusIcon from './StatusIcon';
 const GAP = 2;
 const COLS = 3;
 const CELL_SIZE = (Dimensions.get('window').width - GAP * (COLS + 1)) / COLS;
+// Physical pixel size for the thumbnail request.
+// iOS PhotoKit and Android Glide both use this to deliver a thumbnail
+// at exactly the display resolution instead of decoding the full image.
+const THUMB_PX = Math.round(CELL_SIZE * PixelRatio.get());
 
 /**
  * A single photo cell in the gallery grid.
@@ -51,10 +56,11 @@ function ThumbnailCell({ asset, status, selected, onPress }) {
     >
       {imageReady && (
         <Image
-          source={{ uri: asset.uri }}
+          source={{ uri: asset.uri, width: THUMB_PX, height: THUMB_PX }}
           style={styles.image}
           contentFit="cover"
           recyclingKey={asset.id}
+          cachePolicy="memory-disk"
         />
       )}
 
