@@ -8,6 +8,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { requestPermission } from '../../services/galleryService';
 import { useGalleryAssets } from '../../hooks/useGalleryAssets';
@@ -20,6 +21,7 @@ import SectionHeader from '../../components/SectionHeader';
 export default function GalleryScreen() {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
+  const queryClient = useQueryClient();
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [permissionChecked, setPermissionChecked] = useState(false);
 
@@ -32,6 +34,8 @@ export default function GalleryScreen() {
 
   // Hold the thunk promise so we can call .abort() on cancel
   const syncThunkRef = useRef(null);
+  // Track previous syncing value to detect transition true → false
+  const prevSyncing = useRef(false);
 
   useEffect(() => {
     requestPermission().then((granted) => {
@@ -39,6 +43,15 @@ export default function GalleryScreen() {
       setPermissionChecked(true);
     });
   }, []);
+
+  // After sync completes, refresh the server file list so newly uploaded
+  // photos immediately show green checkmarks in the gallery.
+  useEffect(() => {
+    if (prevSyncing.current && !syncing) {
+      queryClient.invalidateQueries({ queryKey: ['serverFiles'] });
+    }
+    prevSyncing.current = syncing;
+  }, [syncing, queryClient]);
 
   const handleSync = useCallback(() => {
     syncThunkRef.current = dispatch(startSync({ assetsMap }));
@@ -118,6 +131,12 @@ export default function GalleryScreen() {
         )}
         contentContainerStyle={styles.list}
         stickySectionHeadersEnabled
+        // Virtual-scroller tuning: render 2 screens above/below instead of default 10
+        windowSize={5}
+        initialNumToRender={15}
+        maxToRenderPerBatch={9}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews
         ListEmptyComponent={
           <View style={styles.center}>
             <Text style={styles.emptyTitle}>No photos found</Text>
