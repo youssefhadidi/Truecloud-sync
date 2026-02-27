@@ -32,11 +32,11 @@ function ThumbnailCell({ asset, status, selected, onPress }) {
   const [imageReady, setImageReady] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    void InteractionManager.runAfterInteractions().then(() => {
-      if (!cancelled) setImageReady(true);
+    const task = InteractionManager.runAfterInteractions({
+      name: 'ThumbnailCellLoad',
+      run: () => setImageReady(true),
     });
-    return () => { cancelled = true; };
+    return () => task.cancel();
   }, []);
 
   if (!asset) {
