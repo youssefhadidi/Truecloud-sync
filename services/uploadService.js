@@ -50,6 +50,11 @@ export async function uploadFile({
     {
       httpMethod: 'POST',
       uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      // FOREGROUND keeps the upload in-process. The default BACKGROUND mode
+      // hands the request to nsurlsessiond (a separate system daemon), which
+      // can't read PhotoKit-managed files — NSURLSession fails with
+      // NSURLErrorDomain Code=-1 (Unknown) the moment it tries.
+      sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
       headers: { 'Content-Type': mimeType || 'application/octet-stream' },
     },
     ({ totalBytesSent, totalBytesExpectedToSend }) => {
