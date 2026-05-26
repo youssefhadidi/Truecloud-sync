@@ -1,8 +1,6 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import * as Network from 'expo-network';
-import * as FileSystem from 'expo-file-system/legacy';
-import { authEvents } from '../services/axiosClient';
-import { store } from './index';
+import { streamMultipartUpload, buildUploadUrl } from '../services/uploadService';
 import {
   initUploadItems,
   setItemStatus,
@@ -11,9 +9,8 @@ import {
 } from './uploadsSlice';
 
 /**
- * Upload a single shared file via expo-file-system's streaming upload — keeps
- * memory flat regardless of file size (large videos would OOM the FormData
- * path).
+ * Upload a single shared file. Streams the multipart body from disk so large
+ * videos don't blow the memory limit.
  */
 async function uploadSharedFile({ file, syncPath, dispatch, signal }) {
   const id = file.path;
@@ -26,49 +23,18 @@ async function uploadSharedFile({ file, syncPath, dispatch, signal }) {
   dispatch(setItemStatus({ assetId: id, status: 'syncing' }));
 
   try {
-    const { backendUrl } = store.getState().auth;
-    const url = `${backendUrl}/api/files/upload?path=${encodeURIComponent(syncPath)}`;
-
-    let lastPct = -1;
-    const task = FileSystem.createUploadTask(
-      url,
-      file.path,
-      {
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType: file.mimeType || 'application/octet-stream',
-        parameters: {},
-      },
-      ({ totalBytesSent, totalBytesExpectedToSend }) => {
-        const denom = totalBytesExpectedToSend > 0 ? totalBytesExpectedToSend : (file.size || 0);
-        if (denom <= 0) return;
-        const pct = Math.round((totalBytesSent / denom) * 100);
-        if (pct === lastPct) return;
-        lastPct = pct;
+    await streamMultipartUpload({
+      sourceUri: file.path,
+      uploadUrl: buildUploadUrl(syncPath),
+      fieldName: 'file',
+      filename: file.fileName,
+      mimeType: file.mimeType || 'application/octet-stream',
+      fileSize: file.size || 0,
+      signal,
+      onProgress: (pct) => {
         dispatch(setItemProgress({ assetId: id, progress: pct }));
-      }
-    );
-
-    const onAbort = () => { task.cancelAsync().catch(() => {}); };
-    signal.addEventListener('abort', onAbort);
-
-    let result;
-    try {
-      result = await task.uploadAsync();
-    } finally {
-      signal.removeEventListener('abort', onAbort);
-    }
-
-    if (!result) throw new Error('Upload cancelled');
-
-    if (result.status === 401 || result.status === 403) {
-      authEvents.emit('auth:expired');
-      throw new Error(`HTTP ${result.status}`);
-    }
-    if (result.status >= 400) {
-      throw new Error(`HTTP ${result.status}`);
-    }
+      },
+    });
 
     dispatch(setItemStatus({ assetId: id, status: 'synced' }));
   } catch {

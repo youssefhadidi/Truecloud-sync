@@ -2,9 +2,9 @@ import { createAsyncThunk } from '@reduxjs/toolkit';
 import { Alert } from 'react-native';
 import * as Network from 'expo-network';
 import * as FileSystem from 'expo-file-system/legacy';
-import axiosClient, { authEvents } from '../services/axiosClient';
+import axiosClient from '../services/axiosClient';
 import { getAssetInfo } from '../services/galleryService';
-import { store } from './index';
+import { streamMultipartUpload, buildUploadUrl } from '../services/uploadService';
 import {
   initUploadItems,
   setItemStatus,
@@ -20,13 +20,9 @@ const MAX_PARALLEL_UPLOADS = 2;
 const PARALLEL_CEILING = 3;
 
 /**
- * Upload a single asset and dispatch progress updates.
- * Uses the AbortSignal from createAsyncThunk for cancellation.
- *
- * Streams from disk via expo-file-system's createUploadTask (NSURLSession's
- * uploadTask:fromFile on iOS, OkHttp file body on Android). This keeps memory
- * usage constant regardless of file size — the previous axios+FormData path
- * buffered the entire file in JS memory and crashed the app on large videos.
+ * Upload a single asset. Delegates to streamMultipartUpload which builds the
+ * multipart envelope on disk in chunks (so a 900 MB video doesn't OOM) and
+ * uploads via the streaming BINARY_CONTENT path.
  */
 async function uploadOne({ asset, syncPath, dispatch, signal }) {
   if (signal.aborted) {
@@ -53,52 +49,18 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
       }
     }
 
-    const { backendUrl } = store.getState().auth;
-    const url = `${backendUrl}/api/files/upload?path=${encodeURIComponent(syncPath)}`;
-
-    // Dedup progress dispatches — the native callback fires many times per
-    // second. Only emit when the rounded percent actually advances.
-    let lastPct = -1;
-
-    const task = FileSystem.createUploadTask(
-      url,
-      uri,
-      {
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType: asset.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
-        parameters: {},
-      },
-      ({ totalBytesSent, totalBytesExpectedToSend }) => {
-        const denom = totalBytesExpectedToSend > 0 ? totalBytesExpectedToSend : fileSize;
-        if (denom <= 0) return;
-        const pct = Math.round((totalBytesSent / denom) * 100);
-        if (pct === lastPct) return;
-        lastPct = pct;
+    await streamMultipartUpload({
+      sourceUri: uri,
+      uploadUrl: buildUploadUrl(syncPath),
+      fieldName: 'file',
+      filename: asset.filename,
+      mimeType: asset.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+      fileSize,
+      signal,
+      onProgress: (pct) => {
         dispatch(setItemProgress({ assetId: asset.id, progress: pct }));
-      }
-    );
-
-    const onAbort = () => { task.cancelAsync().catch(() => {}); };
-    signal.addEventListener('abort', onAbort);
-
-    let result;
-    try {
-      result = await task.uploadAsync();
-    } finally {
-      signal.removeEventListener('abort', onAbort);
-    }
-
-    if (!result) throw new Error('Upload cancelled');
-
-    if (result.status === 401 || result.status === 403) {
-      authEvents.emit('auth:expired');
-      throw new Error(`HTTP ${result.status}`);
-    }
-    if (result.status >= 400) {
-      throw new Error(`HTTP ${result.status}`);
-    }
+      },
+    });
 
     dispatch(setItemStatus({ assetId: asset.id, status: 'synced' }));
   } catch {
