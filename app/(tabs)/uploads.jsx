@@ -45,6 +45,7 @@ export default function UploadsScreen() {
         creationTime: asset?.creationTime ?? item.creationTime ?? null,
         status: item.status,
         progress: item.progress ?? 0,
+        error: item.error ?? null,
         isSessionEntry: true,
       };
     }
@@ -123,6 +124,12 @@ export default function UploadsScreen() {
                 />
               </View>
             )}
+
+            {item.status === 'failed' && item.error ? (
+              <Text style={styles.errorText} numberOfLines={2}>
+                {item.error}
+              </Text>
+            ) : null}
           </View>
 
           <StatusIcon status={item.status} size={22} />
@@ -200,6 +207,11 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#38bdf8',
     borderRadius: 2,
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 12,
+    marginTop: 4,
   },
   separator: {
     height: 1,

@@ -1,6 +1,6 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import * as Network from 'expo-network';
-import { streamMultipartUpload, buildUploadUrl } from '../services/uploadService';
+import { uploadFile } from '../services/uploadService';
 import {
   initUploadItems,
   setItemStatus,
@@ -8,25 +8,20 @@ import {
   setSyncing,
 } from './uploadsSlice';
 
-/**
- * Upload a single shared file. Streams the multipart body from disk so large
- * videos don't blow the memory limit.
- */
 async function uploadSharedFile({ file, syncPath, dispatch, signal }) {
   const id = file.path;
 
   if (signal.aborted) {
-    dispatch(setItemStatus({ assetId: id, status: 'failed' }));
+    dispatch(setItemStatus({ assetId: id, status: 'failed', error: 'cancelled' }));
     return;
   }
 
   dispatch(setItemStatus({ assetId: id, status: 'syncing' }));
 
   try {
-    await streamMultipartUpload({
+    await uploadFile({
       sourceUri: file.path,
-      uploadUrl: buildUploadUrl(syncPath),
-      fieldName: 'file',
+      syncPath,
       filename: file.fileName,
       mimeType: file.mimeType || 'application/octet-stream',
       fileSize: file.size || 0,
@@ -37,8 +32,10 @@ async function uploadSharedFile({ file, syncPath, dispatch, signal }) {
     });
 
     dispatch(setItemStatus({ assetId: id, status: 'synced' }));
-  } catch {
-    dispatch(setItemStatus({ assetId: id, status: 'failed' }));
+  } catch (err) {
+    const msg = err?.message || String(err);
+    console.warn(`[upload] ${file.fileName} failed:`, msg, err);
+    dispatch(setItemStatus({ assetId: id, status: 'failed', error: msg }));
   }
 }
 

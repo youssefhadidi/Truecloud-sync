@@ -43,7 +43,7 @@ export default function SettingsScreen() {
   const [password, setPassword] = useState('');
   const syncPath = syncPathStored ?? 'sync';
   const [wifiOnly, setWifiOnly] = useState(wifiOnlyStored ?? true);
-  const [maxParallel, setMaxParallel] = useState(String(maxParallelStored ?? 2));
+  const [maxParallel, setMaxParallel] = useState(String(maxParallelStored ?? 3));
   const [hideSynced, setHideSynced] = useState(hideSyncedStored ?? false);
   const [connecting, setConnecting] = useState(false);
 
@@ -103,7 +103,7 @@ export default function SettingsScreen() {
         syncPath,
         wifiOnly,
         hideSynced,
-        maxParallelUploads: Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : 2,
+        maxParallelUploads: Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : 3,
       })
     );
     queryClient.invalidateQueries({ queryKey: ['serverFiles'] });
@@ -213,7 +213,7 @@ export default function SettingsScreen() {
           style={styles.input}
           value={maxParallel}
           onChangeText={setMaxParallel}
-          placeholder="2"
+          placeholder="3"
           placeholderTextColor="#475569"
           keyboardType="numeric"
           returnKeyType="done"

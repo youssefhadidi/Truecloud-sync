@@ -24,11 +24,16 @@ const uploadsSlice = createSlice({
       }
     },
     setItemStatus(state, action) {
-      const { assetId, status } = action.payload;
+      const { assetId, status, error } = action.payload;
       if (state.items[assetId]) {
         state.items[assetId].status = status;
         if (status !== 'syncing') {
           state.items[assetId].progress = status === 'synced' ? 100 : 0;
+        }
+        if (status === 'failed' && error) {
+          state.items[assetId].error = error;
+        } else if (status !== 'failed') {
+          delete state.items[assetId].error;
         }
       }
     },

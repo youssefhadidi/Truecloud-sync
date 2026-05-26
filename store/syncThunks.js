@@ -4,7 +4,7 @@ import * as Network from 'expo-network';
 import * as FileSystem from 'expo-file-system/legacy';
 import axiosClient from '../services/axiosClient';
 import { getAssetInfo } from '../services/galleryService';
-import { streamMultipartUpload, buildUploadUrl } from '../services/uploadService';
+import { uploadFile } from '../services/uploadService';
 import {
   initUploadItems,
   setItemStatus,
@@ -14,19 +14,15 @@ import {
 } from './uploadsSlice';
 import { clearSelection } from './gallerySlice';
 
-const MAX_PARALLEL_UPLOADS = 2;
-// Hard ceiling regardless of user setting — iOS jetsam kills the app if too
-// many concurrent multipart uploads keep file buffers resident in memory.
-const PARALLEL_CEILING = 3;
+const MAX_PARALLEL_UPLOADS = 3;
+// Hard ceiling regardless of user setting — uploads stream from disk now so
+// memory is no longer the bottleneck, but high-concurrency PhotoKit access
+// (getAssetInfoAsync, thumbnail decode) can still misbehave on iOS.
+const PARALLEL_CEILING = 5;
 
-/**
- * Upload a single asset. Delegates to streamMultipartUpload which builds the
- * multipart envelope on disk in chunks (so a 900 MB video doesn't OOM) and
- * uploads via the streaming BINARY_CONTENT path.
- */
 async function uploadOne({ asset, syncPath, dispatch, signal }) {
   if (signal.aborted) {
-    dispatch(setItemStatus({ assetId: asset.id, status: 'failed' }));
+    dispatch(setItemStatus({ assetId: asset.id, status: 'failed', error: 'cancelled' }));
     return;
   }
 
@@ -49,10 +45,9 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
       }
     }
 
-    await streamMultipartUpload({
+    await uploadFile({
       sourceUri: uri,
-      uploadUrl: buildUploadUrl(syncPath),
-      fieldName: 'file',
+      syncPath,
       filename: asset.filename,
       mimeType: asset.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
       fileSize,
@@ -63,9 +58,10 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
     });
 
     dispatch(setItemStatus({ assetId: asset.id, status: 'synced' }));
-  } catch {
-    // Cancelled or network error — mark failed either way
-    dispatch(setItemStatus({ assetId: asset.id, status: 'failed' }));
+  } catch (err) {
+    const msg = err?.message || String(err);
+    console.warn(`[upload] ${asset.filename} failed:`, msg, err);
+    dispatch(setItemStatus({ assetId: asset.id, status: 'failed', error: msg }));
   }
 }
 
