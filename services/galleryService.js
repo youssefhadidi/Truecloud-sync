@@ -1,11 +1,19 @@
 import * as MediaLibrary from 'expo-media-library';
 
 /**
- * Request photo library permission.
+ * Request photo library permission (prompts the user if undetermined).
  * Returns true if granted.
  */
 export async function requestPermission() {
   const { status } = await MediaLibrary.requestPermissionsAsync();
+  return status === 'granted';
+}
+
+/**
+ * Read current permission status without prompting.
+ */
+export async function getPermissionStatus() {
+  const { status } = await MediaLibrary.getPermissionsAsync();
   return status === 'granted';
 }
 

@@ -45,6 +45,15 @@ const uploadsSlice = createSlice({
       state.items = {};
       state.syncing = false;
     },
+    // Drop only synced/skipped entries; keep failures visible so the user
+    // can see what didn't go through (and could be retried later).
+    purgeFinishedUploads(state) {
+      for (const id of Object.keys(state.items)) {
+        const s = state.items[id].status;
+        if (s === 'synced' || s === 'skipped') delete state.items[id];
+      }
+      state.syncing = false;
+    },
   },
 });
 
@@ -54,6 +63,7 @@ export const {
   setItemProgress,
   setSyncing,
   clearUploads,
+  purgeFinishedUploads,
 } = uploadsSlice.actions;
 
 export default uploadsSlice.reducer;

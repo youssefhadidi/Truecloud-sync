@@ -5,6 +5,12 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
     "scheme": "truecloudsync",
     "newArchEnabled": true,
     "ios": {
@@ -16,6 +22,10 @@
       }
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptative-icon.png",
+        "backgroundColor": "#0f172a"
+      },
       "package": "com.truecloud.sync",
       "permissions": [
         "android.permission.READ_MEDIA_IMAGES",
@@ -36,11 +46,22 @@
           "isAccessMediaLocationEnabled": true
         }
       ],
-      "expo-router"
+      "expo-router",
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": ["image/*", "video/*"],
+          "androidMultiIntentFilters": ["image/*", "video/*"],
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsImageWithMaxCount": 100,
+            "NSExtensionActivationSupportsMovieWithMaxCount": 100
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {
-        "projectId": "YOUR_EAS_PROJECT_ID"
+        "projectId": "8e50aa50-9f1f-499b-8240-f7ff9e7dfd20"
       }
     }
   }

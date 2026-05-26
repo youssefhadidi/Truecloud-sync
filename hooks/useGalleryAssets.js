@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { getAllAssets } from '../services/galleryService';
+import { useQuery } from '@tanstack/react-query';
+import { getAllAssets, getPermissionStatus } from '../services/galleryService';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -64,31 +64,35 @@ function buildSections(assets) {
   return { sections, assetsMap };
 }
 
-export function useGalleryAssets(permissionGranted) {
-  const [sections, setSections] = useState([]);
-  const [assetsMap, setAssetsMap] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+const EMPTY = { sections: [], assetsMap: {} };
 
-  const load = useCallback(async () => {
-    if (!permissionGranted) return;
-    setLoading(true);
-    setError(null);
-    try {
+/**
+ * Loads the device gallery and groups it by year/month.
+ *
+ * Backed by React Query so both the Gallery and Uploads tabs share a single
+ * in-memory copy. Permission is checked without prompting — call
+ * `requestPermission()` from galleryService elsewhere (e.g. the Gallery tab on
+ * first mount) and invalidate the `['galleryAssets']` query when it's granted.
+ */
+export function useGalleryAssets(enabled = true) {
+  const query = useQuery({
+    queryKey: ['galleryAssets'],
+    queryFn: async () => {
+      const granted = await getPermissionStatus();
+      if (!granted) return EMPTY;
       const assets = await getAllAssets();
-      const { sections: s, assetsMap: m } = buildSections(assets);
-      setSections(s);
-      setAssetsMap(m);
-    } catch (e) {
-      setError(e.message || 'Failed to load gallery');
-    } finally {
-      setLoading(false);
-    }
-  }, [permissionGranted]);
+      return buildSections(assets);
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: false,
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { sections, assetsMap, loading, error, reload: load };
+  return {
+    sections: query.data?.sections ?? EMPTY.sections,
+    assetsMap: query.data?.assetsMap ?? EMPTY.assetsMap,
+    loading: query.isLoading,
+    error: query.error ? (query.error.message || 'Failed to load gallery') : null,
+    reload: query.refetch,
+  };
 }

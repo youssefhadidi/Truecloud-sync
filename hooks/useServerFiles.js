@@ -17,7 +17,7 @@ export function useServerFiles() {
   return useQuery({
     queryKey: ['serverFiles', syncPath],
     queryFn: async () => {
-      const res = await axiosClient.get(`/api/files?path=${syncPath}`);
+      const res = await axiosClient.get(`/api/files?path=${encodeURIComponent(syncPath)}`);
       const files = res.data?.files || [];
       return new Set(files.map((f) => f.name));
     },

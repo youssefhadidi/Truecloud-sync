@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,8 @@ import { startSync } from '../../store/syncThunks';
 import ThumbnailCell from '../../components/ThumbnailCell';
 import SectionHeader from '../../components/SectionHeader';
 
+const COLS = 3;
+
 export default function GalleryScreen() {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
@@ -31,6 +33,7 @@ export default function GalleryScreen() {
   const selectedIds = useSelector(selectSelectedIdsSet);
   const uploadItems = useSelector((state) => state.uploads.items);
   const syncing = useSelector((state) => state.uploads.syncing);
+  const hideSynced = useSelector((state) => state.settings.hideSynced);
 
   // Hold the thunk promise so we can call .abort() on cancel
   const syncThunkRef = useRef(null);
@@ -41,8 +44,13 @@ export default function GalleryScreen() {
     requestPermission().then((granted) => {
       setPermissionGranted(granted);
       setPermissionChecked(true);
+      if (granted) {
+        // The shared `galleryAssets` query was disabled while permission was
+        // pending; nudge it now that we have access.
+        queryClient.invalidateQueries({ queryKey: ['galleryAssets'] });
+      }
     });
-  }, []);
+  }, [queryClient]);
 
   // After sync completes, refresh the server file list so newly uploaded
   // photos immediately show green checkmarks in the gallery.
@@ -69,6 +77,33 @@ export default function GalleryScreen() {
     },
     [uploadItems, serverFilenames]
   );
+
+  // When "Hide synced" is on, strip server-side synced assets and re-chunk
+  // each section into rows of COLS so the grid stays even.
+  const displaySections = useMemo(() => {
+    if (!hideSynced) return sections;
+
+    return sections
+      .map((section) => {
+        const kept = section.data
+          .flat()
+          .filter((a) => a && !serverFilenames.has(a.filename));
+        if (kept.length === 0) return null;
+
+        const rows = [];
+        for (let i = 0; i < kept.length; i += COLS) {
+          const row = kept.slice(i, i + COLS);
+          while (row.length < COLS) row.push(null);
+          rows.push(row);
+        }
+        return {
+          ...section,
+          data: rows,
+          assetIds: kept.map((a) => a.id),
+        };
+      })
+      .filter(Boolean);
+  }, [sections, serverFilenames, hideSynced]);
 
   if (!permissionChecked) {
     return (
@@ -109,9 +144,11 @@ export default function GalleryScreen() {
   return (
     <View style={[styles.container, { paddingBottom: insets.bottom }]}>
       <SectionList
-        sections={sections}
-        keyExtractor={(row, index) =>
-          row.map((a) => a?.id ?? 'null').join('-') + index
+        sections={displaySections}
+        keyExtractor={(row) =>
+          // The first non-null asset id uniquely identifies the row across all
+          // sections. Padding cells are always at the end.
+          row.find((a) => a)?.id ?? `empty-${Math.random()}`
         }
         renderSectionHeader={({ section }) => (
           <SectionHeader title={section.title} assetIds={section.assetIds} />
@@ -139,7 +176,14 @@ export default function GalleryScreen() {
         removeClippedSubviews
         ListEmptyComponent={
           <View style={styles.center}>
-            <Text style={styles.emptyTitle}>No photos found</Text>
+            <Text style={styles.emptyTitle}>
+              {hideSynced ? 'Everything is synced' : 'No photos found'}
+            </Text>
+            {hideSynced ? (
+              <Text style={styles.emptySub}>
+                Turn off "Hide already-synced" in Settings to see them.
+              </Text>
+            ) : null}
           </View>
         }
       />

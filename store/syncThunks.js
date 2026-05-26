@@ -8,7 +8,7 @@ import {
   setItemStatus,
   setItemProgress,
   setSyncing,
-  clearUploads,
+  purgeFinishedUploads,
 } from './uploadsSlice';
 import { clearSelection } from './gallerySlice';
 
@@ -36,7 +36,7 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
       type: asset.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
     });
 
-    await axiosClient.post(`/api/files/upload?path=${syncPath}`, formData, {
+    await axiosClient.post(`/api/files/upload?path=${encodeURIComponent(syncPath)}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 5 * 60 * 1000,
       signal,
@@ -128,7 +128,7 @@ export const startSync = createAsyncThunk(
     // ── Fetch current server file list ───────────────────────────────────────
     const serverFilenames = new Set();
     try {
-      const res = await axiosClient.get(`/api/files?path=${syncPath}`);
+      const res = await axiosClient.get(`/api/files?path=${encodeURIComponent(syncPath)}`);
       (res.data?.files || []).forEach((f) => serverFilenames.add(f.name));
     } catch {
       // Proceed anyway — worst case we re-upload existing files
@@ -164,7 +164,8 @@ export const startSync = createAsyncThunk(
 
     await runPool(tasks, concurrency);
 
-    dispatch(clearUploads()); // clears items + sets syncing: false
+    // Keep failures visible — the user can see what didn't go through.
+    dispatch(purgeFinishedUploads());
     dispatch(clearSelection());
   }
 );

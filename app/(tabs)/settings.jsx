@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -29,16 +30,21 @@ export default function SettingsScreen() {
   // ── Redux state ────────────────────────────────────────────────────────────
   const backendUrlStored = useSelector((state) => state.auth.backendUrl);
   const userEmail = useSelector((state) => state.auth.userEmail);
-  const { syncPath: syncPathStored, wifiOnly: wifiOnlyStored, maxParallelUploads: maxParallelStored } =
-    useSelector((state) => state.settings);
+  const {
+    syncPath: syncPathStored,
+    wifiOnly: wifiOnlyStored,
+    maxParallelUploads: maxParallelStored,
+    hideSynced: hideSyncedStored,
+  } = useSelector((state) => state.settings);
 
   // ── Local editable state (committed to Redux on Save) ─────────────────────
   const [backendUrl, setBackendUrlLocal] = useState(backendUrlStored || '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [syncPath, setSyncPath] = useState(syncPathStored || 'sync');
+  const syncPath = syncPathStored ?? 'sync';
   const [wifiOnly, setWifiOnly] = useState(wifiOnlyStored ?? true);
   const [maxParallel, setMaxParallel] = useState(String(maxParallelStored ?? 5));
+  const [hideSynced, setHideSynced] = useState(hideSyncedStored ?? false);
   const [connecting, setConnecting] = useState(false);
 
   // ── Connect (re-login from settings if session expired) ───────────────────
@@ -86,17 +92,23 @@ export default function SettingsScreen() {
   // ── Save settings ──────────────────────────────────────────────────────────
   const handleSave = useCallback(() => {
     const parsedMax = parseInt(maxParallel, 10);
-    dispatch(setBackendUrl(backendUrl.trim()));
+    const trimmedUrl = backendUrl.trim();
+    // Only push the URL if it actually changed — avoids overwriting the
+    // stored value when the field is disabled (already signed in).
+    if (trimmedUrl && trimmedUrl !== backendUrlStored) {
+      dispatch(setBackendUrl(trimmedUrl));
+    }
     dispatch(
       updateSettings({
-        syncPath: syncPath.trim() || 'sync',
+        syncPath,
         wifiOnly,
+        hideSynced,
         maxParallelUploads: Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : 5,
       })
     );
     queryClient.invalidateQueries({ queryKey: ['serverFiles'] });
     Alert.alert('Saved', 'Settings saved.');
-  }, [backendUrl, syncPath, wifiOnly, maxParallel, dispatch, queryClient]);
+  }, [backendUrl, backendUrlStored, syncPath, wifiOnly, hideSynced, maxParallel, dispatch, queryClient]);
 
   return (
     <KeyboardAvoidingView
@@ -185,15 +197,16 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>SYNC</Text>
 
         <Text style={styles.fieldLabel}>Sync folder (on server)</Text>
-        <TextInput
-          style={styles.input}
-          value={syncPath}
-          onChangeText={setSyncPath}
-          placeholder="sync"
-          placeholderTextColor="#475569"
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        <TouchableOpacity
+          style={styles.folderPickerButton}
+          onPress={() => router.push('/folder-picker?source=settings')}
+        >
+          <Ionicons name="folder-outline" size={20} color="#38bdf8" />
+          <Text style={styles.folderPickerText} numberOfLines={1}>
+            {syncPath || 'Root'}
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color="#475569" />
+        </TouchableOpacity>
 
         <Text style={styles.fieldLabel}>Parallel uploads (max)</Text>
         <TextInput
@@ -207,13 +220,28 @@ export default function SettingsScreen() {
         />
 
         <View style={styles.switchRow}>
-          <View>
+          <View style={styles.switchTextWrap}>
             <Text style={styles.switchLabel}>Wi-Fi only</Text>
             <Text style={styles.switchSub}>Prevent uploads on mobile data</Text>
           </View>
           <Switch
             value={wifiOnly}
             onValueChange={setWifiOnly}
+            trackColor={{ false: '#1e293b', true: '#38bdf8' }}
+            thumbColor="#f8fafc"
+          />
+        </View>
+
+        <View style={styles.switchRow}>
+          <View style={styles.switchTextWrap}>
+            <Text style={styles.switchLabel}>Hide already-synced</Text>
+            <Text style={styles.switchSub}>
+              Don't show photos that are already on the server
+            </Text>
+          </View>
+          <Switch
+            value={hideSynced}
+            onValueChange={setHideSynced}
             trackColor={{ false: '#1e293b', true: '#38bdf8' }}
             thumbColor="#f8fafc"
           />
@@ -300,6 +328,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#1e293b',
     marginTop: 10,
+    gap: 16,
+  },
+  switchTextWrap: {
+    flex: 1,
   },
   switchLabel: {
     color: '#f1f5f9',
@@ -338,5 +370,21 @@ const styles = StyleSheet.create({
     color: '#f8fafc',
     fontSize: 15,
     fontWeight: '600',
+  },
+  folderPickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  folderPickerText: {
+    flex: 1,
+    color: '#f8fafc',
+    fontSize: 15,
   },
 });

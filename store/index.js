@@ -15,12 +15,14 @@ import authReducer from './authSlice';
 import settingsReducer from './settingsSlice';
 import uploadsReducer from './uploadsSlice';
 import galleryReducer from './gallerySlice';
+import shareReducer from './shareSlice';
 
 const rootReducer = combineReducers({
   auth: authReducer,
   settings: settingsReducer,
   uploads: uploadsReducer, // session-only — not persisted
   gallery: galleryReducer, // session-only — not persisted
+  share: shareReducer,     // session-only — not persisted
 });
 
 const persistConfig = {

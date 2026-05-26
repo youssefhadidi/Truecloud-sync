@@ -25,6 +25,9 @@ function formatDate(timestamp) {
 export default function UploadsScreen() {
   const insets = useSafeAreaInsets();
   const { data: serverFilenames = new Set(), isLoading: serverLoading } = useServerFiles();
+  // The query is permission-gated inside the hook itself — passing `true` just
+  // means "join the shared cache if the Gallery tab has already populated it"
+  // (or load it now if not). It will not prompt the user.
   const { assetsMap } = useGalleryAssets(true);
   const uploadItems = useSelector((state) => state.uploads.items);
 
