@@ -3,6 +3,9 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { selectSelectedIdsSet, selectAll, deselectAll } from '../store/gallerySlice';
 
+// Fixed so gallery's getItemLayout can compute exact offsets without measuring.
+export const SECTION_HEADER_HEIGHT = 40;
+
 export default function SectionHeader({ title, assetIds }) {
   const dispatch = useDispatch();
   const selectedIds = useSelector(selectSelectedIdsSet);
@@ -32,11 +35,11 @@ export default function SectionHeader({ title, assetIds }) {
 
 const styles = StyleSheet.create({
   container: {
+    height: SECTION_HEADER_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    paddingVertical: 8,
     backgroundColor: '#0f172a',
   },
   title: {

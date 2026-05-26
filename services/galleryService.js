@@ -18,28 +18,19 @@ export async function getPermissionStatus() {
 }
 
 /**
- * Fetch all media assets (photos + videos) from the device gallery.
- * Returns a flat array of MediaLibrary.Asset objects, newest first.
+ * Fetch a single page of media assets (photos + videos), newest first.
+ * Returns the raw MediaLibrary result: { assets, hasNextPage, endCursor, totalCount }.
+ *
+ * Pagination is driven by the caller (see useGalleryAssets) so the UI can
+ * render the first page immediately while later pages stream in.
  */
-export async function getAllAssets() {
-  const assets = [];
-  let hasNextPage = true;
-  let endCursor;
-
-  while (hasNextPage) {
-    const result = await MediaLibrary.getAssetsAsync({
-      first: 100,
-      after: endCursor,
-      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-      sortBy: [[MediaLibrary.SortBy.creationTime, false]],
-    });
-
-    assets.push(...result.assets);
-    hasNextPage = result.hasNextPage;
-    endCursor = result.endCursor;
-  }
-
-  return assets;
+export async function getAssetsPage({ first = 100, after } = {}) {
+  return MediaLibrary.getAssetsAsync({
+    first,
+    after,
+    mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+    sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+  });
 }
 
 /**

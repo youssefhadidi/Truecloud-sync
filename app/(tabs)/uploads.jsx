@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -29,6 +29,24 @@ function formatSpeed(bytesPerSecond) {
   return `${Math.round(bytesPerSecond)} B/s`;
 }
 
+// Equality fn for the parent's selector: ignore progress / bytesPerSecond so
+// the list only rebuilds on key or status transitions (a handful of times per
+// upload), not on every progress tick (dozens per second).
+function shallowItemsByStatus(a, b) {
+  if (a === b) return true;
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    const av = a[k];
+    const bv = b[k];
+    if (!bv) return false;
+    if (av.status !== bv.status) return false;
+    if (av.error !== bv.error) return false;
+  }
+  return true;
+}
+
 export default function UploadsScreen() {
   const insets = useSafeAreaInsets();
   const { data: serverFilenames = new Set(), isLoading: serverLoading } = useServerFiles();
@@ -36,52 +54,86 @@ export default function UploadsScreen() {
   // means "join the shared cache if the Gallery tab has already populated it"
   // (or load it now if not). It will not prompt the user.
   const { assetsMap } = useGalleryAssets(true);
-  const uploadItems = useSelector((state) => state.uploads.items);
+  // Custom equality keeps this selector stable across progress dispatches;
+  // it only fires a re-render when an item's status/error or the key set
+  // changes. Per-item progress is read inside <UploadRow> instead.
+  const uploadItems = useSelector(
+    (state) => state.uploads.items,
+    shallowItemsByStatus
+  );
 
-  // Combine session upload entries with server-side synced files
-  const entries = useMemo(() => {
-    const map = {};
+  // filename → asset, rebuilt only when the gallery cache changes. Iterating
+  // serverFilenames (a Set of names) against this map is far cheaper than the
+  // old Object.values(assetsMap) scan that ran on every progress tick.
+  const assetsByFilename = useMemo(() => {
+    const m = new Map();
+    for (const id in assetsMap) m.set(assetsMap[id].filename, assetsMap[id]);
+    return m;
+  }, [assetsMap]);
 
-    // Session entries (pending / syncing / failed / synced / skipped)
+  // Server-only entries (status='synced'), pre-sorted by creationTime desc.
+  // Only recomputes when server data or the library changes — NOT per progress
+  // tick. This is the slice that can grow into the thousands.
+  const serverOnlyEntries = useMemo(() => {
+    const arr = [];
+    for (const filename of serverFilenames) {
+      const asset = assetsByFilename.get(filename);
+      if (!asset) continue;
+      arr.push({
+        assetId: asset.id,
+        filename,
+        uri: asset.uri,
+        creationTime: asset.creationTime,
+        status: 'synced',
+        isSessionEntry: false,
+      });
+    }
+    arr.sort((a, b) => (b.creationTime ?? 0) - (a.creationTime ?? 0));
+    return arr;
+  }, [serverFilenames, assetsByFilename]);
+
+  // Session entries — pending / syncing / failed / synced / skipped. Only
+  // status, filename, uri, creationTime are baked in here; progress / speed /
+  // error are read inside <UploadRow> from Redux so progress ticks don't
+  // invalidate this memo or re-render every row.
+  const sessionEntries = useMemo(() => {
+    const arr = [];
     for (const [assetId, item] of Object.entries(uploadItems)) {
       const asset = assetsMap[assetId];
-      map[assetId] = {
+      arr.push({
         assetId,
         filename: asset?.filename ?? item.filename ?? assetId,
         uri: asset?.uri ?? item.uri ?? null,
         creationTime: asset?.creationTime ?? item.creationTime ?? null,
         status: item.status,
-        progress: item.progress ?? 0,
-        bytesPerSecond: item.bytesPerSecond ?? 0,
-        error: item.error ?? null,
         isSessionEntry: true,
-      };
+      });
     }
-
-    // Server entries not already in session map
-    for (const asset of Object.values(assetsMap)) {
-      if (!map[asset.id] && serverFilenames.has(asset.filename)) {
-        map[asset.id] = {
-          assetId: asset.id,
-          filename: asset.filename,
-          uri: asset.uri,
-          creationTime: asset.creationTime,
-          status: 'synced',
-          progress: 100,
-          isSessionEntry: false,
-        };
-      }
-    }
-
-    // Sort: active first (syncing → pending → failed → skipped → synced)
     const statusOrder = { syncing: 0, pending: 1, failed: 2, skipped: 3, synced: 4 };
-    return Object.values(map).sort((a, b) => {
-      const aOrder = statusOrder[a.status] ?? 99;
-      const bOrder = statusOrder[b.status] ?? 99;
-      if (aOrder !== bOrder) return aOrder - bOrder;
+    arr.sort((a, b) => {
+      const ao = statusOrder[a.status] ?? 99;
+      const bo = statusOrder[b.status] ?? 99;
+      if (ao !== bo) return ao - bo;
       return (b.creationTime ?? 0) - (a.creationTime ?? 0);
     });
-  }, [uploadItems, serverFilenames, assetsMap]);
+    return arr;
+  }, [uploadItems, assetsMap]);
+
+  // Final merge: session entries (already sorted) come first, then any server
+  // entry that isn't already represented in the session list. Skipping the
+  // dedupe pass when there's nothing to dedupe against keeps this O(1) most
+  // of the time.
+  const entries = useMemo(() => {
+    if (sessionEntries.length === 0) return serverOnlyEntries;
+    const sessionIds = new Set(sessionEntries.map((e) => e.assetId));
+    const tail = serverOnlyEntries.filter((e) => !sessionIds.has(e.assetId));
+    return sessionEntries.concat(tail);
+  }, [sessionEntries, serverOnlyEntries]);
+
+  const renderItem = useCallback(
+    ({ item }) => <UploadRow entry={item} />,
+    []
+  );
 
   if (serverLoading && entries.length === 0) {
     return (
@@ -108,51 +160,73 @@ export default function UploadsScreen() {
       keyExtractor={(item) => item.assetId}
       style={styles.container}
       contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
-      renderItem={({ item }) => (
-        <View style={styles.row}>
-          {item.uri ? (
-            <Image source={{ uri: item.uri }} style={styles.thumbnail} />
-          ) : (
-            <View style={[styles.thumbnail, styles.thumbnailPlaceholder]} />
-          )}
-
-          <View style={styles.info}>
-            <Text style={styles.filename} numberOfLines={1}>
-              {item.filename}
-            </Text>
-            {item.creationTime ? (
-              <Text style={styles.date}>{formatDate(item.creationTime)}</Text>
-            ) : null}
-
-            {/* Progress bar + speed — only shown while actively uploading */}
-            {item.status === 'syncing' && (
-              <>
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[styles.progressFill, { width: `${item.progress}%` }]}
-                  />
-                </View>
-                <Text style={styles.speedText}>
-                  {item.progress}%
-                  {item.bytesPerSecond ? ` • ${formatSpeed(item.bytesPerSecond)}` : ''}
-                </Text>
-              </>
-            )}
-
-            {item.status === 'failed' && item.error ? (
-              <Text style={styles.errorText} numberOfLines={2}>
-                {item.error}
-              </Text>
-            ) : null}
-          </View>
-
-          <StatusIcon status={item.status} size={22} />
-        </View>
-      )}
-      ItemSeparatorComponent={() => <View style={styles.separator} />}
+      renderItem={renderItem}
+      ItemSeparatorComponent={ItemSeparator}
     />
   );
 }
+
+const ItemSeparator = () => <View style={styles.separator} />;
+
+/**
+ * Renders a single row. Session entries subscribe to their own slice of
+ * `state.uploads.items` so that a progress tick on asset A doesn't re-render
+ * the row for asset B. Server-only entries skip the subscription entirely.
+ */
+const UploadRow = React.memo(function UploadRow({ entry }) {
+  const { assetId, isSessionEntry, status: staticStatus, filename, uri, creationTime } = entry;
+
+  // useSelector with default (===) equality: only re-fires when this specific
+  // item's reference in state.uploads.items changes — which immer/RTK only does
+  // for the asset whose action ran. Other rows stay quiet.
+  const liveItem = useSelector((s) =>
+    isSessionEntry ? s.uploads.items[assetId] : null
+  );
+
+  const status = liveItem?.status ?? staticStatus;
+  const progress = liveItem?.progress ?? 0;
+  const bytesPerSecond = liveItem?.bytesPerSecond ?? 0;
+  const error = liveItem?.error ?? null;
+
+  return (
+    <View style={styles.row}>
+      {uri ? (
+        <Image source={{ uri }} style={styles.thumbnail} />
+      ) : (
+        <View style={[styles.thumbnail, styles.thumbnailPlaceholder]} />
+      )}
+
+      <View style={styles.info}>
+        <Text style={styles.filename} numberOfLines={1}>
+          {filename}
+        </Text>
+        {creationTime ? (
+          <Text style={styles.date}>{formatDate(creationTime)}</Text>
+        ) : null}
+
+        {status === 'syncing' && (
+          <>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${progress}%` }]} />
+            </View>
+            <Text style={styles.speedText}>
+              {progress}%
+              {bytesPerSecond ? ` • ${formatSpeed(bytesPerSecond)}` : ''}
+            </Text>
+          </>
+        )}
+
+        {status === 'failed' && error ? (
+          <Text style={styles.errorText} numberOfLines={2}>
+            {error}
+          </Text>
+        ) : null}
+      </View>
+
+      <StatusIcon status={status} size={22} />
+    </View>
+  );
+});
 
 const styles = StyleSheet.create({
   container: {

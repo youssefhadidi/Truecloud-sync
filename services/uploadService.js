@@ -43,9 +43,16 @@ export async function uploadFile({
     `?path=${encodeURIComponent(syncPath)}` +
     `&filename=${encodeURIComponent(filename)}`;
 
-  let lastPct = -1;
-  // Rolling speed estimate: sample bytes/time when the rounded percent advances,
-  // smooth with a simple EMA so the displayed value doesn't jitter.
+  // Progress throttling: native fires this callback dozens of times per second.
+  // Each emit dispatches into Redux, which re-renders Gallery + Uploads consumers
+  // — so coalesce to at most one emit per ~200ms / ≥2pp delta, but always let
+  // 100% through so the final state is correct.
+  const MIN_EMIT_INTERVAL_MS = 200;
+  const MIN_PCT_DELTA = 2;
+  let lastEmittedPct = -1;
+  let lastEmitTime = 0;
+  // Rolling speed estimate: smooth with a simple EMA so the displayed value
+  // doesn't jitter.
   let lastSampleBytes = 0;
   let lastSampleTime = Date.now();
   let smoothedBps = 0;
@@ -66,10 +73,13 @@ export async function uploadFile({
       const denom = totalBytesExpectedToSend > 0 ? totalBytesExpectedToSend : fileSize;
       if (denom <= 0 || !onProgress) return;
       const pct = Math.round((totalBytesSent / denom) * 100);
-      if (pct === lastPct) return;
-      lastPct = pct;
 
       const now = Date.now();
+      const isComplete = pct >= 100;
+      const enoughDelta = pct - lastEmittedPct >= MIN_PCT_DELTA;
+      const enoughTime = now - lastEmitTime >= MIN_EMIT_INTERVAL_MS;
+      if (!isComplete && !(enoughDelta && enoughTime)) return;
+
       const dt = (now - lastSampleTime) / 1000;
       if (dt > 0) {
         const instantBps = (totalBytesSent - lastSampleBytes) / dt;
@@ -78,6 +88,8 @@ export async function uploadFile({
         lastSampleTime = now;
       }
 
+      lastEmittedPct = pct;
+      lastEmitTime = now;
       onProgress({ percent: pct, bytesPerSecond: smoothedBps });
     }
   );

@@ -1,19 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback } from 'react';
 import {
   StyleSheet,
   TouchableOpacity,
   View,
   Dimensions,
   PixelRatio,
-  InteractionManager,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useSelector, useDispatch } from 'react-redux';
 import StatusIcon from './StatusIcon';
+import { selectSelectedIdsSet, toggleSelect } from '../store/gallerySlice';
 
-const GAP = 2;
-const COLS = 3;
-const CELL_SIZE = (Dimensions.get('window').width - GAP * (COLS + 1)) / COLS;
+export const GAP = 2;
+export const COLS = 3;
+export const CELL_SIZE = (Dimensions.get('window').width - GAP * (COLS + 1)) / COLS;
+// Each cell has margin GAP/2 on all sides, so a row is taller than CELL_SIZE
+// by one full GAP. Used by gallery's getItemLayout.
+export const ROW_HEIGHT = CELL_SIZE + GAP;
 // Physical pixel size for the thumbnail request.
 // iOS PhotoKit and Android Glide both use this to deliver a thumbnail
 // at exactly the display resolution instead of decoding the full image.
@@ -23,26 +27,28 @@ const THUMB_PX = Math.round(CELL_SIZE * PixelRatio.get());
  * A single photo cell in the gallery grid.
  *
  * Props:
- *   asset      — MediaLibrary.Asset (or null for empty padding cell)
- *   status     — sync status string ('synced'|'syncing'|'pending'|'skipped'|'failed')
- *   selected   — boolean
- *   onPress    — () => void
+ *   asset        — MediaLibrary.Asset (or null for empty padding cell)
+ *   serverSynced — boolean: filename exists on the server
  *
- * Lazy loading: the image is only fetched after all in-flight JS interactions
- * (scroll, animation) have settled, so fast scrolling never triggers a burst
- * of network/decode work for off-screen cells.
+ * Selection state and per-asset upload status are read directly from Redux
+ * via cell-local selectors. A single tap (or progress tick on one upload)
+ * only re-renders the cells whose own derived value actually changed.
  */
-function ThumbnailCell({ asset, status, selected, onPress }) {
-  // Start false — image renders only after interactions settle
-  const [imageReady, setImageReady] = useState(false);
+function ThumbnailCell({ asset, serverSynced }) {
+  const assetId = asset?.id ?? null;
 
-  useEffect(() => {
-    const task = InteractionManager.runAfterInteractions({
-      name: 'ThumbnailCellLoad',
-      run: () => setImageReady(true),
-    });
-    return () => task.cancel();
-  }, []);
+  const selected = useSelector((state) =>
+    assetId ? selectSelectedIdsSet(state).has(assetId) : false
+  );
+  const uploadStatus = useSelector((state) =>
+    assetId ? state.uploads.items[assetId]?.status : undefined
+  );
+  const status = uploadStatus ?? (serverSynced ? 'synced' : null);
+
+  const dispatch = useDispatch();
+  const handlePress = useCallback(() => {
+    if (assetId) dispatch(toggleSelect(assetId));
+  }, [dispatch, assetId]);
 
   if (!asset) {
     return <View style={styles.cell} />;
@@ -51,18 +57,16 @@ function ThumbnailCell({ asset, status, selected, onPress }) {
   return (
     <TouchableOpacity
       style={[styles.cell, selected && styles.selectedCell]}
-      onPress={onPress}
+      onPress={handlePress}
       activeOpacity={0.75}
     >
-      {imageReady && (
-        <Image
-          source={{ uri: asset.uri, width: THUMB_PX, height: THUMB_PX }}
-          style={styles.image}
-          contentFit="cover"
-          recyclingKey={asset.id}
-          cachePolicy="memory-disk"
-        />
-      )}
+      <Image
+        source={{ uri: asset.uri, width: THUMB_PX, height: THUMB_PX }}
+        style={styles.image}
+        contentFit="cover"
+        recyclingKey={asset.id}
+        cachePolicy="memory-disk"
+      />
 
       {/* Selection ring overlay */}
       {selected && (

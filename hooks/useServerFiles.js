@@ -2,6 +2,11 @@ import { useSelector } from 'react-redux';
 import { useQuery } from '@tanstack/react-query';
 import axiosClient from '../services/axiosClient';
 
+// Reused as placeholderData so consumers that destructure `data` get a stable
+// reference; a fresh `new Set()` per render would invalidate every downstream
+// useMemo keyed on it (gallery `displaySections`, uploads `serverOnlyEntries`).
+const EMPTY_FILENAME_SET = Object.freeze(new Set());
+
 /**
  * Fetches the list of files in the configured sync folder on the server.
  * Returns a Set<string> of filenames.
@@ -25,6 +30,6 @@ export function useServerFiles() {
     staleTime: 60 * 1000, // 1 minute
     retry: 1,
     // Return empty Set on error so the app still works offline
-    placeholderData: new Set(),
+    placeholderData: EMPTY_FILENAME_SET,
   });
 }

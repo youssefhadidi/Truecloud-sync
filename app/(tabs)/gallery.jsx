@@ -13,10 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { requestPermission } from '../../services/galleryService';
 import { useGalleryAssets } from '../../hooks/useGalleryAssets';
 import { useServerFiles } from '../../hooks/useServerFiles';
-import { selectSelectedIdsSet, toggleSelect } from '../../store/gallerySlice';
 import { startSync } from '../../store/syncThunks';
-import ThumbnailCell from '../../components/ThumbnailCell';
-import SectionHeader from '../../components/SectionHeader';
+import ThumbnailCell, { ROW_HEIGHT } from '../../components/ThumbnailCell';
+import SectionHeader, { SECTION_HEADER_HEIGHT } from '../../components/SectionHeader';
 
 const COLS = 3;
 
@@ -30,8 +29,9 @@ export default function GalleryScreen() {
   const { sections, assetsMap, loading, error } = useGalleryAssets(permissionGranted);
   const { data: serverFilenames = new Set() } = useServerFiles();
 
-  const selectedIds = useSelector(selectSelectedIdsSet);
-  const uploadItems = useSelector((state) => state.uploads.items);
+  // Only subscribe to the count + syncing flag here — per-cell selection state
+  // is read inside ThumbnailCell, so a tap doesn't re-render the whole screen.
+  const selectedCount = useSelector((state) => state.gallery.selectedIds.length);
   const syncing = useSelector((state) => state.uploads.syncing);
   const hideSynced = useSelector((state) => state.settings.hideSynced);
 
@@ -69,15 +69,6 @@ export default function GalleryScreen() {
     syncThunkRef.current?.abort();
   }, []);
 
-  const getStatus = useCallback(
-    (asset) => {
-      if (uploadItems[asset.id]) return uploadItems[asset.id].status;
-      if (serverFilenames.has(asset.filename)) return 'synced';
-      return null;
-    },
-    [uploadItems, serverFilenames]
-  );
-
   // When "Hide synced" is on, strip server-side synced assets and re-chunk
   // each section into rows of COLS so the grid stays even.
   const displaySections = useMemo(() => {
@@ -104,6 +95,26 @@ export default function GalleryScreen() {
       })
       .filter(Boolean);
   }, [sections, serverFilenames, hideSynced]);
+
+  // Precomputed offset table for SectionList.getItemLayout. SectionList walks
+  // a virtualized index of [header, ...rows, footer-slot] per section; we mirror
+  // that here so RN can skip async measurement and jump to any row in O(1).
+  const getItemLayout = useMemo(() => {
+    if (displaySections.length === 0) return undefined;
+    const layouts = [];
+    let offset = 0;
+    for (const section of displaySections) {
+      layouts.push({ length: SECTION_HEADER_HEIGHT, offset, index: layouts.length });
+      offset += SECTION_HEADER_HEIGHT;
+      for (let i = 0; i < section.data.length; i++) {
+        layouts.push({ length: ROW_HEIGHT, offset, index: layouts.length });
+        offset += ROW_HEIGHT;
+      }
+      // Implicit section footer slot — zero-height but still counted.
+      layouts.push({ length: 0, offset, index: layouts.length });
+    }
+    return (_, index) => layouts[index] ?? { length: 0, offset: 0, index };
+  }, [displaySections]);
 
   if (!permissionChecked) {
     return (
@@ -159,15 +170,14 @@ export default function GalleryScreen() {
               <ThumbnailCell
                 key={asset?.id ?? `empty-${idx}`}
                 asset={asset}
-                status={asset ? getStatus(asset) : null}
-                selected={asset ? selectedIds.has(asset.id) : false}
-                onPress={asset ? () => dispatch(toggleSelect(asset.id)) : undefined}
+                serverSynced={asset ? serverFilenames.has(asset.filename) : false}
               />
             ))}
           </View>
         )}
         contentContainerStyle={styles.list}
         stickySectionHeadersEnabled
+        getItemLayout={getItemLayout}
         // Virtual-scroller tuning: render 2 screens above/below instead of default 10
         windowSize={5}
         initialNumToRender={15}
@@ -189,7 +199,7 @@ export default function GalleryScreen() {
       />
 
       {/* Floating sync/cancel bar */}
-      {(selectedIds.size > 0 || syncing) && (
+      {(selectedCount > 0 || syncing) && (
         <View style={[styles.syncBar, { paddingBottom: insets.bottom + 8 }]}>
           {syncing ? (
             <>
@@ -201,7 +211,7 @@ export default function GalleryScreen() {
           ) : (
             <TouchableOpacity style={styles.syncButton} onPress={handleSync}>
               <Text style={styles.syncButtonText}>
-                Sync {selectedIds.size} selected
+                Sync {selectedCount} selected
               </Text>
             </TouchableOpacity>
           )}
