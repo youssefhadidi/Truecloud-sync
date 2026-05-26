@@ -26,8 +26,8 @@ async function uploadSharedFile({ file, syncPath, dispatch, signal }) {
       mimeType: file.mimeType || 'application/octet-stream',
       fileSize: file.size || 0,
       signal,
-      onProgress: (pct) => {
-        dispatch(setItemProgress({ assetId: id, progress: pct }));
+      onProgress: ({ percent, bytesPerSecond }) => {
+        dispatch(setItemProgress({ assetId: id, progress: percent, bytesPerSecond }));
       },
     });
 

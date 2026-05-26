@@ -38,9 +38,12 @@ const uploadsSlice = createSlice({
       }
     },
     setItemProgress(state, action) {
-      const { assetId, progress } = action.payload;
+      const { assetId, progress, bytesPerSecond } = action.payload;
       if (state.items[assetId]) {
         state.items[assetId].progress = progress;
+        if (typeof bytesPerSecond === 'number') {
+          state.items[assetId].bytesPerSecond = bytesPerSecond;
+        }
       }
     },
     setSyncing(state, action) {

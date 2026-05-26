@@ -22,6 +22,13 @@ function formatDate(timestamp) {
   });
 }
 
+function formatSpeed(bytesPerSecond) {
+  if (!bytesPerSecond || bytesPerSecond <= 0) return '';
+  if (bytesPerSecond >= 1024 * 1024) return `${(bytesPerSecond / 1024 / 1024).toFixed(1)} MB/s`;
+  if (bytesPerSecond >= 1024) return `${(bytesPerSecond / 1024).toFixed(0)} KB/s`;
+  return `${Math.round(bytesPerSecond)} B/s`;
+}
+
 export default function UploadsScreen() {
   const insets = useSafeAreaInsets();
   const { data: serverFilenames = new Set(), isLoading: serverLoading } = useServerFiles();
@@ -45,6 +52,7 @@ export default function UploadsScreen() {
         creationTime: asset?.creationTime ?? item.creationTime ?? null,
         status: item.status,
         progress: item.progress ?? 0,
+        bytesPerSecond: item.bytesPerSecond ?? 0,
         error: item.error ?? null,
         isSessionEntry: true,
       };
@@ -116,13 +124,19 @@ export default function UploadsScreen() {
               <Text style={styles.date}>{formatDate(item.creationTime)}</Text>
             ) : null}
 
-            {/* Progress bar — only shown while actively uploading */}
+            {/* Progress bar + speed — only shown while actively uploading */}
             {item.status === 'syncing' && (
-              <View style={styles.progressTrack}>
-                <View
-                  style={[styles.progressFill, { width: `${item.progress}%` }]}
-                />
-              </View>
+              <>
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[styles.progressFill, { width: `${item.progress}%` }]}
+                  />
+                </View>
+                <Text style={styles.speedText}>
+                  {item.progress}%
+                  {item.bytesPerSecond ? ` • ${formatSpeed(item.bytesPerSecond)}` : ''}
+                </Text>
+              </>
             )}
 
             {item.status === 'failed' && item.error ? (
@@ -211,6 +225,11 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#ef4444',
     fontSize: 12,
+    marginTop: 4,
+  },
+  speedText: {
+    color: '#94a3b8',
+    fontSize: 11,
     marginTop: 4,
   },
   separator: {

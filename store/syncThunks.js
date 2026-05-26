@@ -52,8 +52,8 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
       mimeType: asset.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
       fileSize,
       signal,
-      onProgress: (pct) => {
-        dispatch(setItemProgress({ assetId: asset.id, progress: pct }));
+      onProgress: ({ percent, bytesPerSecond }) => {
+        dispatch(setItemProgress({ assetId: asset.id, progress: percent, bytesPerSecond }));
       },
     });
 

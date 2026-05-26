@@ -22,7 +22,7 @@ import { authEvents } from './axiosClient';
  * @param {string} args.mimeType
  * @param {number} [args.fileSize]    known size for progress fallback
  * @param {AbortSignal} args.signal
- * @param {(pct: number) => void} [args.onProgress]
+ * @param {(args: { percent: number, bytesPerSecond: number }) => void} [args.onProgress]
  */
 export async function uploadFile({
   sourceUri,
@@ -44,6 +44,11 @@ export async function uploadFile({
     `&filename=${encodeURIComponent(filename)}`;
 
   let lastPct = -1;
+  // Rolling speed estimate: sample bytes/time when the rounded percent advances,
+  // smooth with a simple EMA so the displayed value doesn't jitter.
+  let lastSampleBytes = 0;
+  let lastSampleTime = Date.now();
+  let smoothedBps = 0;
   const task = FileSystem.createUploadTask(
     url,
     sourceUri,
@@ -63,7 +68,17 @@ export async function uploadFile({
       const pct = Math.round((totalBytesSent / denom) * 100);
       if (pct === lastPct) return;
       lastPct = pct;
-      onProgress(pct);
+
+      const now = Date.now();
+      const dt = (now - lastSampleTime) / 1000;
+      if (dt > 0) {
+        const instantBps = (totalBytesSent - lastSampleBytes) / dt;
+        smoothedBps = smoothedBps === 0 ? instantBps : smoothedBps * 0.6 + instantBps * 0.4;
+        lastSampleBytes = totalBytesSent;
+        lastSampleTime = now;
+      }
+
+      onProgress({ percent: pct, bytesPerSecond: smoothedBps });
     }
   );
 
