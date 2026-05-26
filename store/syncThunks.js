@@ -13,7 +13,10 @@ import {
 } from './uploadsSlice';
 import { clearSelection } from './gallerySlice';
 
-const MAX_PARALLEL_UPLOADS = 5;
+const MAX_PARALLEL_UPLOADS = 2;
+// Hard ceiling regardless of user setting — iOS jetsam kills the app if too
+// many concurrent multipart uploads keep file buffers resident in memory.
+const PARALLEL_CEILING = 3;
 
 /**
  * Upload a single asset and dispatch progress updates.
@@ -31,10 +34,11 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
     const { uri, fileSize: mediaLibrarySize } = await getAssetInfo(asset.id);
 
     // MediaLibrary often returns 0 for fileSize on iOS (especially for iCloud
-    // originals). Stat the file directly as a fallback so the progress
-    // denominator stays valid when evt.total is also 0.
+    // originals). Stat the file as a fallback when we have a real file:// path.
+    // Skipping non-file URIs avoids a native crash in expo-file-system/legacy
+    // under the new architecture when handed a ph:// asset URI.
     let fileSize = mediaLibrarySize;
-    if (!fileSize) {
+    if (!fileSize && typeof uri === 'string' && uri.startsWith('file://')) {
       try {
         const info = await FileSystem.getInfoAsync(uri, { size: true });
         fileSize = info.size ?? 0;
@@ -172,7 +176,8 @@ export const startSync = createAsyncThunk(
     dispatch(setSyncing(true));
 
     // ── Parallel upload pool ─────────────────────────────────────────────────
-    const concurrency = maxParallelUploads ?? MAX_PARALLEL_UPLOADS;
+    const requested = maxParallelUploads ?? MAX_PARALLEL_UPLOADS;
+    const concurrency = Math.min(Math.max(requested, 1), PARALLEL_CEILING);
     const tasks = toUpload.map(
       (asset) => () => uploadOne({ asset, syncPath, dispatch, signal })
     );

@@ -18,8 +18,12 @@ const gallerySlice = createSlice({
       }
     },
     selectAll(state, action) {
+      // O(N+M) dedupe — `includes` per id would be O(N*M) and stalled the
+      // UI for ~1s on months with several hundred photos.
+      const existing = new Set(state.selectedIds);
       for (const id of action.payload) {
-        if (!state.selectedIds.includes(id)) {
+        if (!existing.has(id)) {
+          existing.add(id);
           state.selectedIds.push(id);
         }
       }

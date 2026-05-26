@@ -5,7 +5,7 @@ const settingsSlice = createSlice({
   initialState: {
     syncPath: 'sync',
     wifiOnly: true,
-    maxParallelUploads: 5,
+    maxParallelUploads: 2,
     hideSynced: false,
   },
   reducers: {
