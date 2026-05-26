@@ -2,8 +2,9 @@ import { createAsyncThunk } from '@reduxjs/toolkit';
 import { Alert } from 'react-native';
 import * as Network from 'expo-network';
 import * as FileSystem from 'expo-file-system/legacy';
-import axiosClient from '../services/axiosClient';
+import axiosClient, { authEvents } from '../services/axiosClient';
 import { getAssetInfo } from '../services/galleryService';
+import { store } from './index';
 import {
   initUploadItems,
   setItemStatus,
@@ -21,6 +22,11 @@ const PARALLEL_CEILING = 3;
 /**
  * Upload a single asset and dispatch progress updates.
  * Uses the AbortSignal from createAsyncThunk for cancellation.
+ *
+ * Streams from disk via expo-file-system's createUploadTask (NSURLSession's
+ * uploadTask:fromFile on iOS, OkHttp file body on Android). This keeps memory
+ * usage constant regardless of file size — the previous axios+FormData path
+ * buffered the entire file in JS memory and crashed the app on large videos.
  */
 async function uploadOne({ asset, syncPath, dispatch, signal }) {
   if (signal.aborted) {
@@ -33,12 +39,12 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
   try {
     const { uri, fileSize: mediaLibrarySize } = await getAssetInfo(asset.id);
 
-    // MediaLibrary often returns 0 for fileSize on iOS (especially for iCloud
-    // originals). Stat the file as a fallback when we have a real file:// path.
-    // Skipping non-file URIs avoids a native crash in expo-file-system/legacy
-    // under the new architecture when handed a ph:// asset URI.
+    if (!uri || !uri.startsWith('file://')) {
+      throw new Error('Asset has no local file:// URI');
+    }
+
     let fileSize = mediaLibrarySize;
-    if (!fileSize && typeof uri === 'string' && uri.startsWith('file://')) {
+    if (!fileSize) {
       try {
         const info = await FileSystem.getInfoAsync(uri, { size: true });
         fileSize = info.size ?? 0;
@@ -47,35 +53,55 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
       }
     }
 
-    const formData = new FormData();
-    formData.append('file', {
-      uri,
-      name: asset.filename,
-      type: asset.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
-    });
+    const { backendUrl } = store.getState().auth;
+    const url = `${backendUrl}/api/files/upload?path=${encodeURIComponent(syncPath)}`;
 
-    // Dedup progress dispatches — axios fires onUploadProgress many times per
-    // second, and each dispatch invalidates state.uploads.items (re-renders
-    // both the Gallery and Uploads tabs). Only emit when the rounded percent
-    // actually advances.
+    // Dedup progress dispatches — the native callback fires many times per
+    // second. Only emit when the rounded percent actually advances.
     let lastPct = -1;
 
-    await axiosClient.post(`/api/files/upload?path=${encodeURIComponent(syncPath)}`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 5 * 60 * 1000,
-      signal,
-      onUploadProgress(evt) {
-        const denom = evt.total > 0 ? evt.total : fileSize;
+    const task = FileSystem.createUploadTask(
+      url,
+      uri,
+      {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType: asset.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+        parameters: {},
+      },
+      ({ totalBytesSent, totalBytesExpectedToSend }) => {
+        const denom = totalBytesExpectedToSend > 0 ? totalBytesExpectedToSend : fileSize;
         if (denom <= 0) return;
-        const pct = Math.round((evt.loaded / denom) * 100);
+        const pct = Math.round((totalBytesSent / denom) * 100);
         if (pct === lastPct) return;
         lastPct = pct;
         dispatch(setItemProgress({ assetId: asset.id, progress: pct }));
-      },
-    });
+      }
+    );
+
+    const onAbort = () => { task.cancelAsync().catch(() => {}); };
+    signal.addEventListener('abort', onAbort);
+
+    let result;
+    try {
+      result = await task.uploadAsync();
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+    }
+
+    if (!result) throw new Error('Upload cancelled');
+
+    if (result.status === 401 || result.status === 403) {
+      authEvents.emit('auth:expired');
+      throw new Error(`HTTP ${result.status}`);
+    }
+    if (result.status >= 400) {
+      throw new Error(`HTTP ${result.status}`);
+    }
 
     dispatch(setItemStatus({ assetId: asset.id, status: 'synced' }));
-  } catch (err) {
+  } catch {
     // Cancelled or network error — mark failed either way
     dispatch(setItemStatus({ assetId: asset.id, status: 'failed' }));
   }
