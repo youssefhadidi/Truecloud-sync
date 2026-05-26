@@ -1,6 +1,7 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import { Alert } from 'react-native';
 import * as Network from 'expo-network';
+import * as FileSystem from 'expo-file-system/legacy';
 import axiosClient from '../services/axiosClient';
 import { getAssetInfo } from '../services/galleryService';
 import {
@@ -27,7 +28,20 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
   dispatch(setItemStatus({ assetId: asset.id, status: 'syncing' }));
 
   try {
-    const { uri, fileSize } = await getAssetInfo(asset.id);
+    const { uri, fileSize: mediaLibrarySize } = await getAssetInfo(asset.id);
+
+    // MediaLibrary often returns 0 for fileSize on iOS (especially for iCloud
+    // originals). Stat the file directly as a fallback so the progress
+    // denominator stays valid when evt.total is also 0.
+    let fileSize = mediaLibrarySize;
+    if (!fileSize) {
+      try {
+        const info = await FileSystem.getInfoAsync(uri, { size: true });
+        fileSize = info.size ?? 0;
+      } catch {
+        fileSize = 0;
+      }
+    }
 
     const formData = new FormData();
     formData.append('file', {
@@ -36,22 +50,23 @@ async function uploadOne({ asset, syncPath, dispatch, signal }) {
       type: asset.mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
     });
 
+    // Dedup progress dispatches — axios fires onUploadProgress many times per
+    // second, and each dispatch invalidates state.uploads.items (re-renders
+    // both the Gallery and Uploads tabs). Only emit when the rounded percent
+    // actually advances.
+    let lastPct = -1;
+
     await axiosClient.post(`/api/files/upload?path=${encodeURIComponent(syncPath)}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 5 * 60 * 1000,
       signal,
       onUploadProgress(evt) {
-        // React Native FormData uploads often report evt.total = 0 because the
-        // Content-Length header isn't set. Fall back to fileSize from MediaLibrary.
         const denom = evt.total > 0 ? evt.total : fileSize;
-        if (denom > 0) {
-          dispatch(
-            setItemProgress({
-              assetId: asset.id,
-              progress: Math.round((evt.loaded / denom) * 100),
-            })
-          );
-        }
+        if (denom <= 0) return;
+        const pct = Math.round((evt.loaded / denom) * 100);
+        if (pct === lastPct) return;
+        lastPct = pct;
+        dispatch(setItemProgress({ assetId: asset.id, progress: pct }));
       },
     });
 

@@ -30,13 +30,42 @@ axiosClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor: emit auth:expired on 401/403
+// Singleton in-flight unlock promise. Multiple parallel requests that hit a
+// 423 all wait on the same prompt — we don't want to stack PIN modals.
+let unlockInFlight = null;
+
+// Response interceptor:
+//  - 401/403 → emit auth:expired (root handler clears auth + bounces to /login)
+//  - 423     → emit session:locked with a resolver pair; once the modal calls
+//              resolve(), retry the original request exactly once.
 axiosClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401 || error.response?.status === 403) {
+  async (error) => {
+    const status = error.response?.status;
+
+    if (status === 401 || status === 403) {
       authEvents.emit('auth:expired');
+      return Promise.reject(error);
     }
+
+    if (status === 423 && error.config && !error.config._sessionRetry) {
+      if (!unlockInFlight) {
+        unlockInFlight = new Promise((resolve, reject) => {
+          authEvents.emit('session:locked', {
+            resolve: () => { unlockInFlight = null; resolve(); },
+            reject: (err) => { unlockInFlight = null; reject(err); },
+          });
+        });
+      }
+      try {
+        await unlockInFlight;
+        error.config._sessionRetry = true;
+        return axiosClient.request(error.config);
+      } catch {
+        return Promise.reject(error);
+      }
+    }
+
     return Promise.reject(error);
   }
 );

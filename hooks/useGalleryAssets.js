@@ -1,4 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { AppState } from 'react-native';
+import * as MediaLibrary from 'expo-media-library';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getAllAssets, getPermissionStatus } from '../services/galleryService';
 
 const MONTHS = [
@@ -75,6 +78,8 @@ const EMPTY = { sections: [], assetsMap: {} };
  * first mount) and invalidate the `['galleryAssets']` query when it's granted.
  */
 export function useGalleryAssets(enabled = true) {
+  const queryClient = useQueryClient();
+
   const query = useQuery({
     queryKey: ['galleryAssets'],
     queryFn: async () => {
@@ -87,6 +92,33 @@ export function useGalleryAssets(enabled = true) {
     staleTime: 5 * 60 * 1000, // 5 minutes
     retry: false,
   });
+
+  // Keep the gallery cache in sync with the device library. MediaLibrary fires
+  // on additions/deletions/edits; AppState covers changes that happened while
+  // backgrounded (iOS listener doesn't always fire for those). Debounced so a
+  // bulk import doesn't trigger a refetch per photo.
+  useEffect(() => {
+    if (!enabled) return;
+
+    let timer;
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['galleryAssets'] });
+      }, 500);
+    };
+
+    const mediaSub = MediaLibrary.addListener(refresh);
+    const appSub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') refresh();
+    });
+
+    return () => {
+      clearTimeout(timer);
+      mediaSub.remove();
+      appSub.remove();
+    };
+  }, [enabled, queryClient]);
 
   return {
     sections: query.data?.sections ?? EMPTY.sections,

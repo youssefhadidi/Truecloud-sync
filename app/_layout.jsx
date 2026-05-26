@@ -9,6 +9,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { store, persistor } from '../store';
 import { clearAuth } from '../store/authSlice';
 import { authEvents } from '../services/axiosClient';
+import SessionLockModal from '../components/SessionLockModal';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -72,6 +73,7 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="folder-picker" options={{ presentation: 'modal' }} />
             </Stack>
+            <SessionLockModal />
           </QueryClientProvider>
         </ShareIntentProvider>
       </PersistGate>
